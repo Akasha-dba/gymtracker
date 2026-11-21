@@ -1,19 +1,18 @@
-# IRON Gym Tracker — проект Android Studio (Samsung S24 Ultra)
+# IRON Gym Tracker — проект для Antigravity и Android Studio
 
-Готовый Android-проект на Kotlin + WebView с вашим минималистичным трекером тренировок внутри (`app/src/main/assets/index.html`).
+Минималистичное оффлайн-приложение для Samsung Galaxy S24 Ultra с вашей программой Full Body (День А / День Б), живым трекером подходов, разминочными подходами (`Р`), подсказками прошлой тренировки (`прошл:`), личными рекордами (PR и 1ПМ), календарём, картой мышц и учётом веса/роста/возраста.
 
-## Как собрать APK (3 шага)
+## Работа в Antigravity
+1. Распакуйте архив в папку без кириллицы (например, `C:\Projects\IronGymTracker_Android`).
+2. Откройте эту папку в **Antigravity**.
+3. В корне уже лежат `AGENTS.md` (контекст архитектуры для ИИ-агента Antigravity) и `.vscode/tasks.json` (готовые задачи сборки и установки по ADB).
+4. Весь интерфейс и логика находятся в одном оффлайн-файле `app/src/main/assets/index.html` — его можно править прямо в Antigravity и сразу проверять в браузере.
 
-1. Распакуйте этот архив и откройте папку `IronGymTracker_Android` в **Android Studio**.
-2. Дождитесь завершения **Gradle Sync** (1–2 минуты при первом запуске).
-3. В верхнем меню нажмите **Build → Build Bundle(s) / APK(s) → Build APK(s)**.
-
-Готовый файл появится по пути:
-`app/build/outputs/apk/debug/app-debug.apk`
-
-Перекиньте `app-debug.apk` на Samsung Galaxy S24 Ultra и установите как обычное приложение.
-
-## Особенности сборки
-- **Постоянное локальное хранилище:** используется `WebViewAssetLoader` (`https://appassets.androidplatform.net/`), поэтому `localStorage` надёжно сохраняется между перезапусками приложения.
-- **Нативный экспорт и импорт JSON:** кнопки резервного копирования в разделе «План → Параметры тела» работают через системный файловый менеджер Android.
-- **AMOLED-тема:** чёрные системные панели статуса и навигации, защита от случайного закрытия кнопкой «Назад».
+## Сборка APK (Android Studio или терминал)
+- **В Android Studio:** откройте папку → дождитесь Gradle Sync → **Build → Build Bundle(s) / APK(s) → Build APK(s)**.
+- **Через терминал (если установлен Gradle / Android SDK):**
+  ```bash
+  gradle assembleDebug
+  adb install -r app/build/outputs/apk/debug/app-debug.apk
+  ```
+- Готовый файл: `app/build/outputs/apk/debug/app-debug.apk`.
