@@ -5,9 +5,13 @@ import android.annotation.SuppressLint
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import android.webkit.JavascriptInterface
 import android.webkit.PermissionRequest
 import android.webkit.WebChromeClient
@@ -96,10 +100,58 @@ class MainActivity : AppCompatActivity() {
                 .setContentTitle(title)
                 .setContentText(body)
                 .setPriority(if (isFinished) NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_LOW)
+                .setOngoing(!isFinished)
                 .setOnlyAlertOnce(!isFinished)
                 .setAutoCancel(isFinished)
 
             NotificationManagerCompat.from(ctx).notify(4201, builder.build())
+        }
+
+        @JavascriptInterface
+        fun cancelRestNotification() {
+            try {
+                NotificationManagerCompat.from(ctx).cancel(4201)
+            } catch (e: Exception) {}
+        }
+
+        @JavascriptInterface
+        fun shareWorkoutText(title: String, text: String) {
+            runOnUiThread {
+                try {
+                    val sendIntent = Intent().apply {
+                        action = Intent.ACTION_SEND
+                        putExtra(Intent.EXTRA_TITLE, title)
+                        putExtra(Intent.EXTRA_TEXT, text)
+                        type = "text/plain"
+                    }
+                    val shareIntent = Intent.createChooser(sendIntent, title)
+                    startActivity(shareIntent)
+                } catch (e: Exception) {}
+            }
+        }
+
+        @JavascriptInterface
+        fun vibrateHaptic(type: String) {
+            runOnUiThread {
+                try {
+                    val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        val vm = getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
+                        vm?.defaultVibrator
+                    } else {
+                        @Suppress("DEPRECATION")
+                        getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+                    }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        when (type) {
+                            "click" -> vibrator?.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_CLICK))
+                            "heavy" -> vibrator?.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_HEAVY_CLICK))
+                            "tick" -> vibrator?.vibrate(VibrationEffect.createOneShot(35, 120))
+                            "finish" -> vibrator?.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 180, 80, 250, 80, 400), -1))
+                            else -> vibrator?.vibrate(VibrationEffect.createOneShot(50, VibrationEffect.DEFAULT_AMPLITUDE))
+                        }
+                    }
+                } catch (e: Exception) {}
+            }
         }
     }
 

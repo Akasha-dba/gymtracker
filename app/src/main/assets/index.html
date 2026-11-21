@@ -1082,7 +1082,36 @@
       function vibrate(ms) {
         try {
           if (state.settings && state.settings.restVibrate === false) return;
+          if (window.AndroidBridge && typeof window.AndroidBridge.vibrateHaptic === 'function') {
+            if (Array.isArray(ms) && ms.length > 2) {
+              window.AndroidBridge.vibrateHaptic('finish');
+            } else if (typeof ms === 'number' && ms <= 40) {
+              window.AndroidBridge.vibrateHaptic('tick');
+            } else {
+              window.AndroidBridge.vibrateHaptic('click');
+            }
+          }
           if (navigator && typeof navigator.vibrate === 'function') navigator.vibrate(ms || 20);
+        } catch (e) {}
+      }
+
+      function playCountdownBeep(sec) {
+        try {
+          if (state.settings && state.settings.restSound === false) return;
+          const AudioCtx = window.AudioContext || window.webkitAudioContext;
+          if (!AudioCtx) return;
+          const ctx = new AudioCtx();
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = 'sine';
+          const freq = sec === 1 ? 960 : (sec === 2 ? 880 : 800);
+          osc.frequency.setValueAtTime(freq, ctx.currentTime);
+          gain.gain.setValueAtTime(0.09, ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.08);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start();
+          osc.stop(ctx.currentTime + 0.08);
         } catch (e) {}
       }
 
@@ -1092,21 +1121,32 @@
           const AudioCtx = window.AudioContext || window.webkitAudioContext;
           if (!AudioCtx) return;
           const ctx = new AudioCtx();
-          const osc = ctx.createOscillator();
-          const gain = ctx.createGain();
-          osc.type = 'sine';
           if (isFinish) {
-            osc.frequency.setValueAtTime(880, ctx.currentTime);
-            osc.frequency.setValueAtTime(1174.66, ctx.currentTime + 0.16);
-            gain.gain.setValueAtTime(0.11, ctx.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.48);
-            osc.connect(gain);
-            gain.connect(ctx.destination);
-            osc.start();
-            osc.stop(ctx.currentTime + 0.48);
+            // Triple sports fanfare chord: C6 (1046.5Hz) -> E6 (1318.5Hz) -> G6 (1568Hz)
+            const now = ctx.currentTime;
+            const chords = [
+              { f: 1046.5, t: now,        d: 0.12, vol: 0.16 },
+              { f: 1318.5, t: now + 0.11, d: 0.12, vol: 0.19 },
+              { f: 1568.0, t: now + 0.22, d: 0.42, vol: 0.24 }
+            ];
+            chords.forEach(c => {
+              const osc = ctx.createOscillator();
+              const gain = ctx.createGain();
+              osc.type = 'triangle';
+              osc.frequency.setValueAtTime(c.f, c.t);
+              gain.gain.setValueAtTime(c.vol, c.t);
+              gain.gain.exponentialRampToValueAtTime(0.001, c.t + c.d);
+              osc.connect(gain);
+              gain.connect(ctx.destination);
+              osc.start(c.t);
+              osc.stop(c.t + c.d);
+            });
           } else {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = 'sine';
             osc.frequency.setValueAtTime(660, ctx.currentTime);
-            gain.gain.setValueAtTime(0.05, ctx.currentTime);
+            gain.gain.setValueAtTime(0.06, ctx.currentTime);
             gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.18);
             osc.connect(gain);
             gain.connect(ctx.destination);
@@ -1246,16 +1286,20 @@
           if (rem <= 0) {
             stopRestTimer(true);
             playRestBeep(true);
-            vibrate([60, 80, 60]);
+            vibrate([120, 80, 220, 80, 350]);
             showToast('Отдых закончился — пора к подходу!');
             sendRestSystemNotification(
-              'Отдых закончился!',
+              'Отдых закончился! ⚡',
               activeRestExerciseName ? `Пора выполнять подход: ${activeRestExerciseName}` : 'Время отдыха вышло — к снаряду!',
               true
             );
           } else {
-            // Update notification at milestone marks (60s, 30s, 10s) so user sees remaining time in shade
-            if ((rem === 60 || rem === 30 || rem === 10) && restLastNotifiedBucket !== rem) {
+            // Audio countdown beeps (3, 2, 1) and tactile haptics
+            if (rem <= 3 && rem >= 1 && restLastNotifiedBucket !== rem) {
+              restLastNotifiedBucket = rem;
+              playCountdownBeep(rem);
+              vibrate(35);
+            } else if ((rem === 60 || rem === 30 || rem === 15 || rem === 10) && restLastNotifiedBucket !== rem) {
               restLastNotifiedBucket = rem;
               if (rem === 10) playRestBeep(false);
               sendRestSystemNotification(
@@ -1266,7 +1310,7 @@
             }
             updateRestBar();
           }
-        }, 500);
+        }, 300);
       }
 
       function stopRestTimer(silent) {
@@ -1276,6 +1320,9 @@
         }
         restEndTimestamp = 0;
         restTotalSec = 0;
+        if (window.AndroidBridge && typeof window.AndroidBridge.cancelRestNotification === 'function') {
+          try { window.AndroidBridge.cancelRestNotification(); } catch (e) {}
+        }
         const bar = document.getElementById('rest-timer-bar');
         if (bar) bar.classList.add('hidden');
       }
@@ -2533,8 +2580,275 @@
           closeModal();
           ui.tab = 'history';
           render();
-          showToast(editId ? 'Изменения в тренировке сохранены' : 'Тренировка сохранена в календарь!');
+          if (!editId) {
+            setTimeout(() => { openWorkoutSummaryModal(finished); }, 150);
+          } else {
+            showToast('Изменения в тренировке сохранены');
+          }
         });
+      }
+
+      function openWorkoutSummaryModal(wk) {
+        if (!wk) return;
+        const durStr = formatDuration(wk.durationSec || 60);
+        const tonStr = (wk.tonnage || 0).toLocaleString('ru-RU');
+
+        // Calculate Personal Records (PR) in this workout
+        const prList = [];
+        (wk.exercises || []).forEach(ex => {
+          let maxW = 0;
+          let maxR = 0;
+          (ex.sets || []).forEach(s => {
+            if (s.completed && !s.isWarmup) {
+              const w = Number(s.weight) || 0;
+              const r = Number(s.reps) || 0;
+              if (w > maxW) { maxW = w; maxR = r; }
+            }
+          });
+          if (maxW > 0) {
+            let pastMax = 0;
+            (state.history || []).forEach(h => {
+              if (h.id !== wk.id) {
+                (h.exercises || []).forEach(he => {
+                  if (he.name === ex.name) {
+                    (he.sets || []).forEach(hs => {
+                      if (hs.completed && !hs.isWarmup) {
+                        const hw = Number(hs.weight) || 0;
+                        if (hw > pastMax) pastMax = hw;
+                      }
+                    });
+                  }
+                });
+              }
+            });
+            if (pastMax > 0 && maxW > pastMax) {
+              prList.push({ name: ex.name, weight: maxW, reps: maxR, diff: (maxW - pastMax).toFixed(1) });
+            }
+          }
+        });
+
+        const dateStr = wk.date ? wk.date.split('-').reverse().join('.') : new Date().toLocaleDateString('ru-RU');
+        let shareText = `⚡ IRON GYM TRACKER\n`;
+        shareText += `Тренировка: ${wk.dayName || 'Full Body'}\n`;
+        shareText += `📅 ${dateStr} • ⏱ ${durStr} • 🏋 ${tonStr} кг\n`;
+        shareText += `🎯 Выполнено: ${wk.doneSets || 0} / ${wk.totalSets || 0} подходов\n\n`;
+        shareText += `Упражнения:\n`;
+        (wk.exercises || []).forEach((ex, idx) => {
+          const setsDone = (ex.sets || []).filter(s => s.completed && !s.isWarmup);
+          if (setsDone.length > 0) {
+            const setStr = setsDone.map(s => `${s.weight}кг×${s.reps}`).join(', ');
+            shareText += `${idx + 1}. ${ex.name}: ${setStr}\n`;
+          }
+        });
+        if (prList.length > 0) {
+          shareText += `\n★ Личные рекорды сегодня:\n`;
+          prList.forEach(p => {
+            shareText += `• ${p.name}: ${p.weight} кг × ${p.reps} (+${p.diff} кг)\n`;
+          });
+        }
+        shareText += `\n#irongym #workout #training`;
+
+        openModal('Итоги тренировки ⚡', `
+          <div class="space-y-4">
+            <div class="text-center pb-1">
+              <div class="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 mb-2">
+                <i data-lucide="trophy" class="w-6 h-6"></i>
+              </div>
+              <h2 class="text-lg font-bold tracking-tight text-white">${escapeHtml(wk.dayName || 'Full Body')}</h2>
+              <p class="text-xs text-[#8e8e98]">${dateStr}</p>
+            </div>
+
+            <div class="grid grid-cols-3 gap-2.5 text-center">
+              <div class="amoled-elevated p-3">
+                <div class="text-[11px] text-[#8e8e98]">Время</div>
+                <div class="text-base font-bold text-white mt-0.5">${durStr}</div>
+              </div>
+              <div class="amoled-elevated p-3">
+                <div class="text-[11px] text-[#8e8e98]">Тоннаж</div>
+                <div class="text-base font-bold text-emerald-400 mt-0.5">${tonStr} кг</div>
+              </div>
+              <div class="amoled-elevated p-3">
+                <div class="text-[11px] text-[#8e8e98]">Подходы</div>
+                <div class="text-base font-bold text-white mt-0.5">${wk.doneSets || 0} / ${wk.totalSets || 0}</div>
+              </div>
+            </div>
+
+            ${prList.length > 0 ? `
+              <div class="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/30">
+                <div class="text-[11px] font-bold text-amber-300 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+                  <i data-lucide="sparkles" class="w-4 h-4 text-amber-400"></i>
+                  <span>Новые личные рекорды:</span>
+                </div>
+                <div class="text-xs text-amber-100 space-y-1">
+                  ${prList.map(p => `<div>★ <strong>${escapeHtml(p.name)}</strong>: ${p.weight} кг × ${p.reps} (<span class="text-amber-400">+${p.diff} кг</span>)</div>`).join('')}
+                </div>
+              </div>
+            ` : ''}
+
+            <div class="amoled-elevated p-3.5 space-y-2">
+              <div class="text-[11px] text-[#8e8e98] uppercase tracking-wider font-semibold">Упражнения за сессию</div>
+              <div class="text-xs space-y-1.5 max-h-40 overflow-y-auto pr-1">
+                ${(wk.exercises || []).map((ex, i) => {
+                  const done = (ex.sets || []).filter(s => s.completed && !s.isWarmup);
+                  if (done.length === 0) return '';
+                  return `
+                    <div class="flex justify-between items-center py-1 border-b border-[#1f1f28] last:border-none">
+                      <span class="font-medium text-white truncate mr-2">${i+1}. ${escapeHtml(ex.name)}</span>
+                      <span class="text-[#a1a1aa] font-mono text-[11px] shrink-0">${done.length} × (${done[0].weight}кг)</span>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            </div>
+
+            <div class="flex flex-col gap-2 pt-1">
+              <button id="summary-share-text-btn" type="button" class="w-full py-3 rounded-2xl bg-emerald-500 text-black font-semibold text-sm flex items-center justify-center gap-2 active:scale-[0.98]">
+                <i data-lucide="share-2" class="w-4 h-4"></i>
+                <span>Поделиться отчётом (Telegram / Заметки)</span>
+              </button>
+              <button id="summary-share-card-btn" type="button" class="w-full py-3 rounded-2xl bg-[#1c1c24] border border-[#2a2a38] text-white font-medium text-sm flex items-center justify-center gap-2 active:scale-[0.98]">
+                <i data-lucide="download" class="w-4 h-4"></i>
+                <span>Сохранить карточку (PNG)</span>
+              </button>
+              <button id="summary-close-btn" type="button" class="w-full py-2.5 text-xs text-[#8e8e98] hover:text-white">
+                Закрыть и перейти в календарь
+              </button>
+            </div>
+          </div>
+        `);
+
+        if (window.lucide) window.lucide.createIcons();
+
+        document.getElementById('summary-share-text-btn').addEventListener('click', () => {
+          if (window.AndroidBridge && typeof window.AndroidBridge.shareWorkoutText === 'function') {
+            window.AndroidBridge.shareWorkoutText('Итоги тренировки IRON', shareText);
+          } else if (navigator.share) {
+            navigator.share({ title: 'Итоги тренировки IRON', text: shareText }).catch(() => {});
+          } else if (navigator.clipboard) {
+            navigator.clipboard.writeText(shareText).then(() => {
+              showToast('Отчёт скопирован в буфер обмена!');
+            });
+          }
+        });
+
+        document.getElementById('summary-share-card-btn').addEventListener('click', () => {
+          generateAndDownloadWorkoutCard(wk);
+        });
+
+        document.getElementById('summary-close-btn').addEventListener('click', closeModal);
+      }
+
+      function generateAndDownloadWorkoutCard(wk) {
+        try {
+          const canvas = document.createElement('canvas');
+          const size = 1080;
+          canvas.width = size;
+          canvas.height = size;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) return;
+
+          ctx.fillStyle = '#050508';
+          ctx.fillRect(0, 0, size, size);
+
+          ctx.strokeStyle = '#1f1f2a';
+          ctx.lineWidth = 4;
+          ctx.strokeRect(32, 32, size - 64, size - 64);
+
+          ctx.strokeStyle = '#d4ff00';
+          ctx.lineWidth = 8;
+          ctx.beginPath();
+          ctx.moveTo(32, 80); ctx.lineTo(32, 32); ctx.lineTo(80, 32);
+          ctx.moveTo(size - 80, 32); ctx.lineTo(size - 32, 32); ctx.lineTo(size - 32, 80);
+          ctx.moveTo(32, size - 80); ctx.lineTo(32, size - 32); ctx.lineTo(80, size - 32);
+          ctx.moveTo(size - 80, size - 32); ctx.lineTo(size - 32, size - 32); ctx.lineTo(size - 32, size - 80);
+          ctx.stroke();
+
+          ctx.font = 'bold 36px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+          ctx.fillStyle = '#ffffff';
+          ctx.fillText('IRON GYM TRACKER', 80, 110);
+
+          ctx.font = 'bold 22px ui-monospace, monospace';
+          ctx.fillStyle = '#d4ff00';
+          ctx.fillText('● COMPLETED SESSION', size - 370, 108);
+
+          ctx.font = 'bold 56px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+          ctx.fillStyle = '#ffffff';
+          const title = (wk.dayName || 'Full Body').toUpperCase();
+          ctx.fillText(title, 80, 200);
+
+          const dateStr = wk.date ? wk.date.split('-').reverse().join('.') : new Date().toLocaleDateString('ru-RU');
+          ctx.font = '26px ui-monospace, monospace';
+          ctx.fillStyle = '#8e8e98';
+          ctx.fillText(dateStr + ' • SAMSUNG S24 ULTRA', 80, 245);
+
+          ctx.strokeStyle = '#1e1e26';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(80, 280); ctx.lineTo(size - 80, 280);
+          ctx.stroke();
+
+          const boxW = 280;
+          const boxH = 140;
+          const boxY = 320;
+          const metrics = [
+            { label: 'ВРЕМЯ', val: formatDuration(wk.durationSec || 60), color: '#ffffff' },
+            { label: 'ТОННАЖ', val: (wk.tonnage || 0).toLocaleString('ru-RU') + ' КГ', color: '#d4ff00' },
+            { label: 'ПОДХОДЫ', val: `${wk.doneSets || 0} / ${wk.totalSets || 0}`, color: '#ffffff' }
+          ];
+
+          metrics.forEach((m, i) => {
+            const bx = 80 + i * (boxW + 40);
+            ctx.fillStyle = '#0f0f15';
+            ctx.fillRect(bx, boxY, boxW, boxH);
+            ctx.strokeStyle = '#232330';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(bx, boxY, boxW, boxH);
+
+            ctx.font = 'bold 18px ui-monospace, monospace';
+            ctx.fillStyle = '#787885';
+            ctx.fillText(m.label, bx + 24, boxY + 44);
+
+            ctx.font = 'bold 38px ui-monospace, monospace';
+            ctx.fillStyle = m.color;
+            ctx.fillText(m.val, bx + 24, boxY + 104);
+          });
+
+          ctx.font = 'bold 24px ui-monospace, monospace';
+          ctx.fillStyle = '#d4ff00';
+          ctx.fillText('УПРАЖНЕНИЯ И РАБОЧИЕ ПОДХОДЫ:', 80, 520);
+
+          let curY = 570;
+          (wk.exercises || []).slice(0, 6).forEach((ex, idx) => {
+            const setsDone = (ex.sets || []).filter(s => s.completed && !s.isWarmup);
+            if (setsDone.length === 0) return;
+            const setStr = setsDone.map(s => `${s.weight}кг×${s.reps}`).join('  |  ');
+
+            ctx.font = 'bold 28px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+            ctx.fillStyle = '#ffffff';
+            ctx.fillText(`${idx + 1}. ${ex.name}`, 80, curY);
+
+            ctx.font = '22px ui-monospace, monospace';
+            ctx.fillStyle = '#a1a1aa';
+            ctx.fillText(setStr, 80, curY + 34);
+
+            curY += 72;
+          });
+
+          ctx.font = 'bold 20px ui-monospace, monospace';
+          ctx.fillStyle = '#52525e';
+          ctx.fillText('IRON GYM TRACKER • PROUDLY TRAINED WITH IRON', 80, size - 80);
+
+          const dataUrl = canvas.toDataURL('image/png');
+          const link = document.createElement('a');
+          link.download = `IRON_Workout_${wk.date || 'today'}.png`;
+          link.href = dataUrl;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          showToast('Карточка тренировки сохранена в PNG!');
+        } catch (e) {
+          showToast('Ошибка создания карточки', 'error');
+        }
       }
 
       function openCancelWorkoutModal() {
