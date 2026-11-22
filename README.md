@@ -8,6 +8,12 @@
 3. В корне уже лежат `AGENTS.md` (контекст архитектуры для ИИ-агента Antigravity) и `.vscode/tasks.json` (готовые задачи сборки и установки по ADB).
 4. Весь интерфейс и логика находятся в одном оффлайн-файле `app/src/main/assets/index.html` — его можно править прямо в Antigravity и сразу проверять в браузере.
 
+## Версия для iPhone / Web (PWA)
+Приложение доступно онлайн без установки из App Store:
+👉 **https://akasha-dba.github.io/gymtracker/**
+1. Откройте ссылку на iPhone в Safari.
+2. Нажмите «Поделиться» → «На экран „Домой“» (Add to Home Screen).
+
 ## Сборка APK (Android Studio или терминал)
 - **В Android Studio:** откройте папку → дождитесь Gradle Sync → **Build → Build Bundle(s) / APK(s) → Build APK(s)**.
 - **Через терминал (если установлен Gradle / Android SDK):**
